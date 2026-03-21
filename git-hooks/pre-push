@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Pre-push hook for bot_army_rss_polling
+# Pre-push hook for ergon-rss-polling
 # Ensures code is tested, compiled, and released before pushing to main
 # Uses absolute paths since git hooks run in a restricted environment
 
@@ -17,7 +17,7 @@ if [ "$BRANCH" != "main" ]; then
 fi
 
 echo "==============================================="
-echo "Pre-push hook: bot_army_rss_polling"
+echo "Pre-push hook: ergon-rss-polling"
 echo "==============================================="
 
 # Step 1: Compile with strict warnings
@@ -65,7 +65,7 @@ echo ""
 echo "5️⃣  Publishing to GitHub releases..."
 gh release create "v${RELEASE_VSN}" \
   "$TARBALL" \
-  --repo "ergon-automation-labs/bot-army-rss-polling" \
+  --repo "ergon-automation-labs/ergon-rss-polling" \
   --title "RSS Polling Bot v${RELEASE_VSN}" \
   --notes "Release v${RELEASE_VSN}" \
   2>/dev/null || {
