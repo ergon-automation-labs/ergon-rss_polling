@@ -1,0 +1,21 @@
+# Elixir
+/_build/
+/deps/
+/doc/
+*.beam
+erl_crash.dump
+.elixir_ls/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Release
+rss_polling/
+
+# Logs
+*.log
