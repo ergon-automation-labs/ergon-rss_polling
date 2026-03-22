@@ -54,6 +54,7 @@ pipeline {
           gh release download $LATEST_RELEASE \
             --repo ${GITHUB_REPO} \
             --pattern "*.tar.gz" \
+            --skip-existing \
             -D ./release-artifact
 
           echo "✓ Release downloaded successfully"
