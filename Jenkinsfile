@@ -17,7 +17,7 @@ pipeline {
     RELEASE_NAME = 'rss_polling'
     STATE_NAME = 'bot_army_rss_polling'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
-    GITHUB_REPO = "ergon-automation-labs/ergon-rss-polling"
+    GITHUB_REPO = "ergon-automation-labs/ergon-rss_polling"
     SALT_TARGET = '-G bot_army_node_type:air'
   }
 
