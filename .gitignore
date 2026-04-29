@@ -1,6 +1,7 @@
 # Elixir
 /_build/
 /deps/
+/.cache/
 /doc/
 *.beam
 erl_crash.dump
