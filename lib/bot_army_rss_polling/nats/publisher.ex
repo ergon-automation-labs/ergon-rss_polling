@@ -24,7 +24,7 @@ defmodule BotArmyRssPolling.NATS.Publisher do
 
     event = build_event(payload)
 
-    case BotArmyRuntime.NATS.Publisher.publish("job.listings.ingest", event) do
+    case BotArmyLibraryRuntime.NATS.Publisher.publish("job.listings.ingest", event) do
       :ok ->
         Logger.debug("Published RSS listing: #{payload["title"]} (#{company_name})")
         :ok
