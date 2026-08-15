@@ -1,6 +1,6 @@
 MIX ?= /Users/abby/.local/share/mise/shims/mix
 
-compile: ## Compile the project
+_compile-impl: ## Compile the project
 	$(MIX) compile
 
 test: ## Run the test suite
