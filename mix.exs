@@ -4,12 +4,12 @@ defmodule BotArmyRssPolling.MixProject do
   def project do
     [
       app: :bot_army_rss_polling,
-      version: "0.1.21",
+      version: "0.1.22",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       releases: [
-        rss_polling: [
+        rss_polling_bot: [
           applications: [bot_army_rss_polling: :permanent]
         ]
       ]
