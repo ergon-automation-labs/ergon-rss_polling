@@ -1,4 +1,3 @@
-MIX ?= /Users/abby/.local/share/mise/shims/mix
 
 .PHONY: release publish-release test
 
