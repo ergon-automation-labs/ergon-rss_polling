@@ -1,6 +1,11 @@
 defmodule BotArmyRssPolling.Sieve do
   @moduledoc """
   Initial triage of RSS items using a local LLM via the NATS bus.
+
+  Items are scored as async LLM jobs, in batches: every item in a batch is submitted
+  first, and then the whole set is polled together. A batch takes about as long as its
+  slowest job, not the sum of all of them, and a triaged (queued) request is waited
+  for like any other job instead of being read as an empty answer.
   """
 
   require Logger
@@ -9,12 +14,31 @@ defmodule BotArmyRssPolling.Sieve do
   @poll_ms 2_000
 
   @doc """
-  Triage an RSS item. Returns {:ok, score} where score is 0..10, or {:error, reason}.
+  Score a batch of RSS items. Returns `[{item, result}]`, where result is
+  `{:ok, score}` (0..10) or `{:error, reason}`. Blocks until every job is done or the
+  budget runs out; the caller decides what to do with each result.
   """
-  def triage(item) do
-    title = item["title"] || ""
-    description = item["description"] || ""
-    text = "Title: #{title}\nDescription: #{description}"
+  def triage_many([]), do: []
+
+  def triage_many(items) do
+    submitted =
+      Enum.map(items, fn item ->
+        case submit(item) do
+          {:ok, job_id} -> {:pending, item, job_id}
+          {:error, reason} -> {:done, item, {:error, reason}}
+        end
+      end)
+
+    deadline = System.monotonic_time(:millisecond) + @job_budget_ms
+    done = for {:done, item, result} <- submitted, do: {item, result}
+    pending = for {:pending, item, job_id} <- submitted, do: {item, job_id}
+
+    await_all(pending, deadline, done)
+  end
+
+  # Submit one item as an async job. Returns {:ok, job_id} or {:error, reason}.
+  defp submit(item) do
+    text = "Title: #{item["title"] || ""}\nDescription: #{item["description"] || ""}"
 
     prompt = """
     You are a high-speed signal filter for a sovereign intelligence system.
@@ -45,15 +69,14 @@ defmodule BotArmyRssPolling.Sieve do
       "query" => prompt,
       "model" => "sieve",
       "temperature" => 0,
-      # Async: the LLM bot answers with a job id at once, and the answer is read by
-      # polling llm.job.status. A queued (triaged) request then cannot be mistaken
-      # for an empty answer, and a slow one gets the full job budget.
+      # Async: the LLM bot answers with a job id at once; the score is read by polling
+      # llm.job.status. A queued (triaged) request cannot be mistaken for an empty answer.
       "async" => true
     }
 
     case BotArmyLibraryRuntime.NATS.Publisher.request("llm.request.chat", payload) do
       {:ok, %{"job_id" => job_id}} when is_binary(job_id) ->
-        await_score(job_id, System.monotonic_time(:millisecond) + @job_budget_ms)
+        {:ok, job_id}
 
       {:ok, %{"ok" => false, "error" => error}} ->
         Logger.error("LLM Service refused the sieve request: #{inspect(error)}")
@@ -69,29 +92,56 @@ defmodule BotArmyRssPolling.Sieve do
     end
   end
 
-  # Poll the job until it completes, fails, or the budget runs out. Each poll is short,
-  # so one slow job cannot hold a single request open for the whole budget.
-  defp await_score(job_id, deadline) do
+  # One round over the still-pending jobs, then a short sleep, until none are pending or the
+  # budget runs out. Each round asks each pending job once, so a slow job never holds the rest.
+  defp await_all([], _deadline, done), do: done
+
+  defp await_all(pending, deadline, done) do
+    {still, finished} =
+      Enum.reduce(pending, {[], []}, fn {item, job_id}, {still, finished} ->
+        case job_status(job_id) do
+          :pending -> {[{item, job_id} | still], finished}
+          {:done, result} -> {still, [{item, result} | finished]}
+        end
+      end)
+
+    done = done ++ Enum.reverse(finished)
+
+    cond do
+      still == [] ->
+        done
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        Logger.warning("#{length(still)} sieve job(s) still running at budget; leaving them")
+        done ++ Enum.map(still, fn {item, _} -> {item, {:error, :timeout}} end)
+
+      true ->
+        Process.sleep(@poll_ms)
+        await_all(Enum.reverse(still), deadline, done)
+    end
+  end
+
+  # :pending while the job runs; {:done, result} once it has an answer or has failed.
+  defp job_status(job_id) do
     case BotArmyLibraryRuntime.NATS.Publisher.request("llm.job.status", %{"job_id" => job_id}) do
       {:ok, %{"status" => "completed", "result" => result}} ->
-        result |> content_of() |> parse_score()
+        {:done, result |> content_of() |> parse_score()}
 
       {:ok, %{"status" => "failed"} = job} ->
         Logger.error("Sieve job #{job_id} failed: #{inspect(job["error"])}")
-        {:error, :api_error}
+        {:done, {:error, :api_error}}
 
       {:ok, %{"status" => status}} when status in ["pending", "running", "queued"] ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          Logger.warning("Sieve job #{job_id} still #{status} at its budget; leaving it")
-          {:error, :timeout}
-        else
-          Process.sleep(@poll_ms)
-          await_score(job_id, deadline)
-        end
+        :pending
 
-      other ->
+      {:ok, other} ->
         Logger.error("Unexpected job status reply for #{job_id}: #{inspect(other)}")
-        {:error, :malformed_response}
+        {:done, {:error, :malformed_response}}
+
+      {:error, reason} ->
+        # Transient transport error: ask again on the next round.
+        Logger.warning("Sieve status request for #{job_id} failed: #{inspect(reason)}")
+        :pending
     end
   end
 
