@@ -69,9 +69,11 @@ defmodule BotArmyRssPolling.Poller do
           else
             case Sieve.triage(item) do
               {:ok, score} when score >= 5 ->
+                log_score(item, score, true, tags)
                 Publisher.publish_finding(item, score, tags)
 
-              {:ok, _score} ->
+              {:ok, score} ->
+                log_score(item, score, false, tags)
                 Logger.debug("RSS item filtered as noise: #{item["title"] || "Untitled"}")
 
               {:error, reason} ->
@@ -89,6 +91,20 @@ defmodule BotArmyRssPolling.Poller do
 
   defp poll_feed(feed) do
     Logger.warning("Invalid feed configuration: #{inspect(feed)}")
+  end
+
+  # One line per scored item, admitted or not, so the source report can measure how
+  # often each host clears the sieve cutoff. Grep: RSS_SCORE
+  defp log_score(item, score, admitted, tags) do
+    host =
+      case URI.parse(item["url"] || "") do
+        %URI{host: host} when is_binary(host) -> String.replace_prefix(host, "www.", "")
+        _ -> "unknown"
+      end
+
+    Logger.info(
+      "RSS_SCORE host=#{host} score=#{score} admitted=#{admitted} tags=#{Enum.join(tags, ",")}"
+    )
   end
 
   defp is_job_listing?(tags) do
