@@ -9,9 +9,10 @@ defmodule BotArmyRssPolling.Poller do
   use GenServer
   require Logger
 
-  alias BotArmyRssPolling.{FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher}
+  alias BotArmyRssPolling.{FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher, Sieve}
 
-  @check_interval_ms 900_000  # 15 minutes
+  # 15 minutes
+  @check_interval_ms 900_000
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -62,7 +63,23 @@ defmodule BotArmyRssPolling.Poller do
 
         Enum.each(new_items, fn item ->
           DedupFilter.mark_seen(item["guid"])
-          Publisher.publish_listing(item, company_name, tags)
+
+          if is_job_listing?(tags) do
+            Publisher.publish_listing(item, company_name, tags)
+          else
+            case Sieve.triage(item) do
+              {:ok, score} when score >= 5 ->
+                Publisher.publish_finding(item, score, tags)
+
+              {:ok, _score} ->
+                Logger.debug("RSS item filtered as noise: #{item["title"] || "Untitled"}")
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Sieve triage failed for #{item["title"] || "Untitled"}: #{inspect(reason)}"
+                )
+            end
+          end
         end)
 
       {:error, reason} ->
@@ -72,5 +89,9 @@ defmodule BotArmyRssPolling.Poller do
 
   defp poll_feed(feed) do
     Logger.warning("Invalid feed configuration: #{inspect(feed)}")
+  end
+
+  defp is_job_listing?(tags) do
+    Enum.any?(tags, fn tag -> tag == "job" or tag == "listing" end)
   end
 end

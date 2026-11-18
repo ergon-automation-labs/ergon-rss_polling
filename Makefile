@@ -24,7 +24,7 @@ publish-release: release
 		echo "Failed to resolve version from mix.exs"; \
 		exit 1; \
 	fi; \
-	TARBALL="rss_polling_bot-$$VERSION.tar.gz"; \
+	TARBALL="bot_army_rss_polling-$$VERSION.tar.gz"; \
 	echo "Version: $$VERSION"; \
 	echo "Creating release tarball..."; \
 	tar -czf "$$TARBALL" -C _build/prod/rel rss_polling_bot/; \
