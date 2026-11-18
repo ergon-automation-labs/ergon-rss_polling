@@ -23,7 +23,9 @@ defmodule BotArmyRssPolling.FeedConfig do
   Returns a list of feed maps with keys: url, company_name, tags.
   """
   def feeds do
-    case System.get_env("RSS_FEEDS_JSON") do
+    # The config file (loaded in config/runtime.exs) first, then the environment.
+    case BotArmyLibraryRuntime.ConfigLoader.get("RSS_FEEDS_JSON") ||
+           System.get_env("RSS_FEEDS_JSON") do
       nil ->
         Logger.warning("RSS_FEEDS_JSON environment variable not set, using empty feed list")
         []
