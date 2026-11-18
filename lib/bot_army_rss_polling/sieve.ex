@@ -5,6 +5,9 @@ defmodule BotArmyRssPolling.Sieve do
 
   require Logger
 
+  @job_budget_ms 180_000
+  @poll_ms 2_000
+
   @doc """
   Triage an RSS item. Returns {:ok, score} where score is 0..10, or {:error, reason}.
   """
@@ -41,19 +44,19 @@ defmodule BotArmyRssPolling.Sieve do
     payload = %{
       "query" => prompt,
       "model" => "sieve",
-      "temperature" => 0
+      "temperature" => 0,
+      # Async: the LLM bot answers with a job id at once, and the answer is read by
+      # polling llm.job.status. A queued (triaged) request then cannot be mistaken
+      # for an empty answer, and a slow one gets the full job budget.
+      "async" => true
     }
 
-    # Use the library runtime's NATS request to avoid direct HTTP dependencies
     case BotArmyLibraryRuntime.NATS.Publisher.request("llm.request.chat", payload) do
-      {:ok, %{"ok" => true, "data" => data}} when is_map(data) ->
-        # Data from llm.request.chat is typically a map containing the answer
-        # If it's a string directly, handle that. If it's in a 'content' key, handle that.
-        content = if is_binary(data), do: data, else: data["content"] || data["answer"]
-        parse_score(content)
+      {:ok, %{"job_id" => job_id}} when is_binary(job_id) ->
+        await_score(job_id, System.monotonic_time(:millisecond) + @job_budget_ms)
 
       {:ok, %{"ok" => false, "error" => error}} ->
-        Logger.error("LLM Service returned error: #{inspect(error)}")
+        Logger.error("LLM Service refused the sieve request: #{inspect(error)}")
         {:error, :api_error}
 
       {:error, reason} ->
@@ -65,6 +68,38 @@ defmodule BotArmyRssPolling.Sieve do
         {:error, :malformed_response}
     end
   end
+
+  # Poll the job until it completes, fails, or the budget runs out. Each poll is short,
+  # so one slow job cannot hold a single request open for the whole budget.
+  defp await_score(job_id, deadline) do
+    case BotArmyLibraryRuntime.NATS.Publisher.request("llm.job.status", %{"job_id" => job_id}) do
+      {:ok, %{"status" => "completed", "result" => result}} ->
+        result |> content_of() |> parse_score()
+
+      {:ok, %{"status" => "failed"} = job} ->
+        Logger.error("Sieve job #{job_id} failed: #{inspect(job["error"])}")
+        {:error, :api_error}
+
+      {:ok, %{"status" => status}} when status in ["pending", "running", "queued"] ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          Logger.warning("Sieve job #{job_id} still #{status} at its budget; leaving it")
+          {:error, :timeout}
+        else
+          Process.sleep(@poll_ms)
+          await_score(job_id, deadline)
+        end
+
+      other ->
+        Logger.error("Unexpected job status reply for #{job_id}: #{inspect(other)}")
+        {:error, :malformed_response}
+    end
+  end
+
+  # The stored result is the chat reply: either {ok, data: {...}} or the fields directly.
+  defp content_of(%{"data" => data}) when is_map(data), do: content_of(data)
+  defp content_of(%{} = map), do: map["content"] || map["answer"] || map["text"]
+  defp content_of(text) when is_binary(text), do: text
+  defp content_of(_), do: nil
 
   defp parse_score(nil), do: {:error, :empty_response}
 
