@@ -11,7 +11,8 @@ defmodule BotArmyRssPolling.NATS.Publisher do
   @doc """
   Publish a single RSS feed item to job.listings.ingest.
   """
-  def publish_listing(item, company_name, tags) when is_map(item) and is_binary(company_name) and is_list(tags) do
+  def publish_listing(item, company_name, tags)
+      when is_map(item) and is_binary(company_name) and is_list(tags) do
     payload = %{
       "source" => "rss",
       "company_name" => company_name,
@@ -32,6 +33,91 @@ defmodule BotArmyRssPolling.NATS.Publisher do
       {:error, reason} ->
         Logger.error("Failed to publish listing: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Publish a high-signal RSS item as a finding to the Intelligence Protocol.
+  """
+  def publish_finding(item, score, tags \\ [])
+      when is_map(item) and is_integer(score) and is_list(tags) do
+    # Determine the theory ID based on tags. If tags are empty, use the general stream.
+    theory_id =
+      case tags do
+        [] -> "rss_signal_stream"
+        [primary | _] -> "rss_#{primary}_stream"
+      end
+
+    # We post this as evidence for the specific topic's theory.
+    payload = %{
+      "theory_id" => theory_id,
+      "summary" => "High-signal RSS item: #{item["title"] || "Untitled"}",
+      "stance" => "support",
+      "source" => "bot_army_rss_polling",
+      "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "metadata" => %{
+        "score" => score,
+        "url" => item["url"] || "",
+        "title" => item["title"] || "",
+        "tags" => tags
+      }
+    }
+
+    category = finding_category(tags)
+
+    with :ok <- ensure_theory(theory_id, category),
+         {:ok, _} <- request("bridge.nexus.intelligence.blackboard.evidence.post", payload) do
+      Logger.debug(
+        "Posted RSS finding (score #{score}) to #{theory_id}: #{item["title"] || "Untitled"}"
+      )
+
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Failed to post RSS finding to #{theory_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @finding_categories ~w(culinary growth gaming local vitality gifts date_night macro ai uncategorized)
+
+  defp finding_category([primary | _]) when primary in @finding_categories, do: primary
+  defp finding_category(_tags), do: "uncategorized"
+
+  # Evidence can only attach to a theory that exists, so post the theory on first sight.
+  # Later findings for the same theory reuse it.
+  defp ensure_theory(theory_id, category) do
+    case request("bridge.nexus.intelligence.blackboard.theory.get", %{"id" => theory_id}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, %{"code" => "not_found"}} ->
+        theory = %{
+          "id" => theory_id,
+          "statement" => "RSS findings for #{theory_id}",
+          "topic" => "RSS findings",
+          "category" => category,
+          "proposed_by" => "bot_army_rss_polling",
+          "metadata" => %{"source" => "bot_army_rss_polling"}
+        }
+
+        case request("bridge.nexus.intelligence.blackboard.theory.post", theory) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # One request/reply to a bridge subject. The bridge answers {ok: true, data} or {ok: false, code}.
+  defp request(subject, payload) do
+    case BotArmyLibraryRuntime.NATS.Publisher.request(subject, payload) do
+      {:ok, %{"ok" => true} = reply} -> {:ok, reply}
+      {:ok, %{"ok" => false} = reply} -> {:error, reply}
+      {:ok, other} -> {:error, {:unexpected_reply, other}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
