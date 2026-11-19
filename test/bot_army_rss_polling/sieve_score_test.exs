@@ -49,8 +49,14 @@ defmodule BotArmyRssPolling.SieveScoreTest do
     test "is an async, deterministic request carrying the item text", %{payload: p} do
       assert p["async"] == true
       assert p["temperature"] == 0
-      assert p["query"] =~ "Title: Fed cuts rates"
-      assert p["query"] =~ "Output ONLY the integer"
+      assert p["prompt_context"]["prompt"] =~ "Title: Fed cuts rates"
+      assert p["prompt_context"]["prompt"] =~ "Output ONLY the integer"
+    end
+
+    test "the prompt is where llm.request.chat reads it; a top-level query is ignored there",
+         %{payload: p} do
+      refute Map.has_key?(p, "query")
+      assert is_binary(get_in(p, ["prompt_context", "prompt"]))
     end
   end
 
@@ -58,14 +64,19 @@ defmodule BotArmyRssPolling.SieveScoreTest do
     import ExUnit.CaptureLog
 
     test "a readable reply is scored and logs nothing" do
-      log = capture_log(fn -> assert {:ok, 7} = Sieve.read_result("j1", %{"data" => %{"content" => "7"}}) end)
+      log =
+        capture_log(fn ->
+          assert {:ok, 7} = Sieve.read_result("j1", %{"data" => %{"content" => "7"}})
+        end)
+
       refute log =~ "unreadable"
     end
 
     test "an empty reply is logged raw with its shape and job id" do
       log =
         capture_log(fn ->
-          assert {:error, :parse_error} = Sieve.read_result("job-abc", %{"data" => %{"content" => ""}})
+          assert {:error, :parse_error} =
+                   Sieve.read_result("job-abc", %{"data" => %{"content" => ""}})
         end)
 
       assert log =~ "Sieve reply unreadable (parse_error)"

@@ -89,7 +89,9 @@ defmodule BotArmyRssPolling.Sieve do
     """
 
     %{
-      "query" => prompt,
+      # llm.request.chat reads the prompt from prompt_context.prompt. A top-level "query" is
+      # ignored, the model gets an empty prompt, and it answers "Hello! How can I assist you?"
+      "prompt_context" => %{"prompt" => prompt},
       "model" => @sieve_model,
       "model_type" => "uncensored",
       # A reasoning model on its default settings spends the answer on hidden thinking and
