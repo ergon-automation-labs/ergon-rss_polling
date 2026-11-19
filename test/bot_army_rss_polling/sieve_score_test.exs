@@ -37,9 +37,14 @@ defmodule BotArmyRssPolling.SieveScoreTest do
       %{payload: Sieve.request_payload(%{"title" => "Fed cuts rates", "description" => "FOMC"})}
     end
 
-    test "asks for the local uncensored type, so a cloud model never scores it", %{payload: p} do
-      assert p["model_type"] == "uncensored"
-      assert p["model"] == "baytout3/qwen3.5-uncensored:4b"
+    test "asks for the local_ollama source and names no model of its own", %{payload: p} do
+      assert p["source"] == "local_ollama"
+      refute Map.has_key?(p, "model")
+      refute Map.has_key?(p, "model_type")
+    end
+
+    test "gives the job a deadline", %{payload: p} do
+      assert p["timeout_ms"] == 180_000
     end
 
     test "turns thinking off, or the reply is an empty string", %{payload: p} do

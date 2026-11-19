@@ -10,7 +10,6 @@ defmodule BotArmyRssPolling.Sieve do
 
   require Logger
 
-  @sieve_model "baytout3/qwen3.5-uncensored:4b"
   @job_budget_ms 180_000
   @poll_ms 2_000
 
@@ -92,8 +91,11 @@ defmodule BotArmyRssPolling.Sieve do
       # llm.request.chat reads the prompt from prompt_context.prompt. A top-level "query" is
       # ignored, the model gets an empty prompt, and it answers "Hello! How can I assist you?"
       "prompt_context" => %{"prompt" => prompt},
-      "model" => @sieve_model,
-      "model_type" => "uncensored",
+      # The local_ollama source: local models only, its own breaker, a deadline we choose. The
+      # model is the pillar's default for that source (llm:local_ollama:models, first entry);
+      # this bot does not name one.
+      "source" => "local_ollama",
+      "timeout_ms" => @job_budget_ms,
       # A reasoning model on its default settings spends the answer on hidden thinking and
       # replies with an empty string, which is not a score.
       "think" => false,
