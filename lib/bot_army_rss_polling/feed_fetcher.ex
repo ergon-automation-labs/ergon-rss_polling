@@ -90,7 +90,7 @@ defmodule BotArmyRssPolling.FeedFetcher do
     normalized =
       Enum.map(items, fn item ->
         %{
-          "guid" => to_string(item[:guid] || ""),
+          "guid" => guid_for(item),
           "title" => to_string(item[:title] || ""),
           "url" => to_string(item[:link] || ""),
           "description" => to_string(item[:description] || ""),
@@ -100,5 +100,13 @@ defmodule BotArmyRssPolling.FeedFetcher do
       |> Enum.filter(&(String.length(Map.get(&1, "guid", "")) > 0))
 
     {:ok, normalized}
+  end
+
+  # Some feeds (Hacker News) carry no <guid>; the item's link is the stable key then.
+  defp guid_for(item) do
+    case to_string(item[:guid] || "") do
+      "" -> to_string(item[:link] || "")
+      guid -> guid
+    end
   end
 end

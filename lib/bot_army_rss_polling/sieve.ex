@@ -151,15 +151,21 @@ defmodule BotArmyRssPolling.Sieve do
   defp content_of(text) when is_binary(text), do: text
   defp content_of(_), do: nil
 
+  @doc false
+  def score_reply(content), do: parse_score(content)
+
   defp parse_score(nil), do: {:error, :empty_response}
 
   defp parse_score(content) when is_binary(content) do
-    case String.trim(content) |> String.to_integer() do
-      score when score in 0..10 -> {:ok, score}
-      _ -> {:error, :invalid_score}
+    cleaned =
+      content
+      |> String.replace(~r/<think>.*?<\/think>/s, "")
+      |> String.replace(~r/<think>.*\z/s, "")
+
+    case Regex.run(~r/(?<![\d.])(10|[0-9])(?![\d])/, cleaned) do
+      [_, digits] -> {:ok, String.to_integer(digits)}
+      _ -> {:error, :parse_error}
     end
-  rescue
-    _ -> {:error, :parse_error}
   end
 
   defp parse_score(_), do: {:error, :invalid_type}

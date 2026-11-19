@@ -74,4 +74,18 @@ defmodule BotArmyRssPolling.FeedFetcherTest do
 
     assert {:error, _} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
   end
+
+  test "an item with no <guid> is keyed by its link, so it is not dropped" do
+    :persistent_term.put({__MODULE__, :owner}, self())
+
+    hn = """
+    <rss version="2.0"><channel><title>HN</title>
+    <item><title>No guid</title><link>https://example.com/x</link>
+    <description>d</description></item></channel></rss>
+    """
+
+    {port, _pid} = serve(hn)
+    assert {:ok, [item]} = FeedFetcher.fetch("http://127.0.0.1:#{port}/rss")
+    assert item["guid"] == "https://example.com/x"
+  end
 end
