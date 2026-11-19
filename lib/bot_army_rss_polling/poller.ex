@@ -16,6 +16,12 @@ defmodule BotArmyRssPolling.Poller do
   alias BotArmyRssPolling.{FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher, Sieve}
 
   # 15 minutes
+  # The sieve scores one item at a time on a shared local model, about five seconds each.
+  # A feed that returns hundreds of items must not queue them all, or every other caller of
+  # that node waits behind them. Items past a cap are left unseen and are taken on later polls.
+  @max_new_per_feed 25
+  @max_scored_per_poll 100
+
   @check_interval_ms 900_000
 
   def start_link(_opts) do
@@ -99,7 +105,11 @@ defmodule BotArmyRssPolling.Poller do
     try do
       feeds = FeedConfig.feeds()
       Logger.info("Polling #{length(feeds)} RSS feeds")
-      Enum.each(feeds, &poll_feed/1)
+
+      Enum.reduce(feeds, @max_scored_per_poll, fn feed, budget ->
+        budget - poll_feed(feed, budget)
+      end)
+
       :ok
     rescue
       error -> {:error, Exception.message(error)}
@@ -108,7 +118,8 @@ defmodule BotArmyRssPolling.Poller do
     end
   end
 
-  defp poll_feed(%{"url" => url, "company_name" => company_name, "tags" => tags} = _feed) do
+  # Returns how many items this feed spent from the poll's scoring budget.
+  defp poll_feed(%{"url" => url, "company_name" => company_name, "tags" => tags} = _feed, budget) do
     case FeedFetcher.fetch(url) do
       {:ok, items} ->
         Logger.info("Fetched #{length(items)} items from #{url}")
@@ -119,20 +130,39 @@ defmodule BotArmyRssPolling.Poller do
         if is_job_listing?(tags) do
           Enum.each(new_items, fn item -> DedupFilter.mark_seen(item["guid"]) end)
           Enum.each(new_items, fn item -> Publisher.publish_listing(item, company_name, tags) end)
+          0
         else
+          batch = take_budget(new_items, budget)
+
+          if length(batch) < length(new_items) do
+            Logger.info(
+              "Scoring #{length(batch)} of #{length(new_items)} new items from #{url}; the rest wait for a later poll"
+            )
+          end
+
           # One batch per feed: every item is submitted, then the batch is polled together.
-          results = Sieve.triage_many(new_items)
+          results = Sieve.triage_many(batch)
           mark_scored_seen(results)
           Enum.each(results, fn {item, result} -> handle_score(item, result, tags) end)
+          length(batch)
         end
 
       {:error, reason} ->
         Logger.warning("RSS poll failed for #{url}: #{inspect(reason)}")
+        0
     end
   end
 
-  defp poll_feed(feed) do
+  defp poll_feed(feed, _budget) do
     Logger.warning("Invalid feed configuration: #{inspect(feed)}")
+    0
+  end
+
+  # The items to score now: at most @max_new_per_feed, and never more than what is left of the
+  # poll's budget. Feeds list newest first, so the head is the freshest.
+  @doc false
+  def take_budget(items, budget) do
+    Enum.take(items, max(min(@max_new_per_feed, budget), 0))
   end
 
   # An item is "seen" once it has been scored, not once it has been fetched. A sieve that

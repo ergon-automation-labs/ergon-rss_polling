@@ -63,4 +63,31 @@ defmodule BotArmyRssPolling.PollerTest do
       assert DedupFilter.seen?("noise-1")
     end
   end
+
+  describe "take_budget/2" do
+    defp items(n), do: for(i <- 1..n//1, do: %{"guid" => "g#{i}"})
+
+    test "a feed that returns hundreds is cut to its newest 25" do
+      batch = Poller.take_budget(items(913), 100)
+      assert length(batch) == 25
+      assert hd(batch)["guid"] == "g1"
+    end
+
+    test "a small feed is taken whole" do
+      assert length(Poller.take_budget(items(8), 100)) == 8
+    end
+
+    test "the poll budget bounds what is left, even under the per-feed cap" do
+      assert length(Poller.take_budget(items(50), 10)) == 10
+    end
+
+    test "an exhausted or negative budget scores nothing" do
+      assert [] == Poller.take_budget(items(50), 0)
+      assert [] == Poller.take_budget(items(50), -5)
+    end
+
+    test "no items is no batch" do
+      assert [] == Poller.take_budget([], 100)
+    end
+  end
 end
