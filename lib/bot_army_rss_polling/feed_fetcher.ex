@@ -10,6 +10,10 @@ defmodule BotArmyRssPolling.FeedFetcher do
   require Logger
 
   @http_timeout_ms 15_000
+  @request_headers [
+    {~c"user-agent", ~c"Mozilla/5.0 (compatible; BotArmyRssPolling)"},
+    {~c"accept", ~c"application/rss+xml, application/atom+xml, application/xml, text/xml, */*"}
+  ]
 
   @doc """
   Fetch and parse a single RSS/Atom feed.
@@ -25,7 +29,12 @@ defmodule BotArmyRssPolling.FeedFetcher do
   """
   def fetch(url) do
     with {:ok, {{_http, 200, _status}, _headers, body}} <-
-           :httpc.request(:get, {String.to_charlist(url), []}, [{:timeout, @http_timeout_ms}], []),
+           :httpc.request(
+             :get,
+             {String.to_charlist(url), @request_headers},
+             [{:timeout, @http_timeout_ms}, {:autoredirect, true}],
+             body_format: :binary
+           ),
          {:ok, items} <- parse_feed(body) do
       {:ok, items}
     else
@@ -40,14 +49,12 @@ defmodule BotArmyRssPolling.FeedFetcher do
   end
 
   defp parse_feed(body) when is_binary(body) do
-    case SweetXml.parse(body) do
-      {:ok, doc} ->
-        parse_items(doc)
-
-      {:error, reason} ->
-        Logger.error("Failed to parse XML: #{inspect(reason)}")
-        {:error, reason}
-    end
+    doc = SweetXml.parse(body, quiet: true)
+    parse_items(doc)
+  catch
+    :exit, reason ->
+      Logger.error("Failed to parse XML: #{inspect(reason)}")
+      {:error, {:invalid_xml, reason}}
   end
 
   defp parse_feed(_body), do: {:error, :invalid_body}
