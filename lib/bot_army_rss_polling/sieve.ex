@@ -159,10 +159,28 @@ defmodule BotArmyRssPolling.Sieve do
 
   @doc false
   def read_result(job_id, result) do
-    scored = result |> content_of() |> parse_score()
-    log_unreadable(job_id, result, scored)
-    scored
+    if degraded?(result) do
+      Logger.warning(
+        "Sieve job #{job_id} answered by the bot's fallback (#{degrade_reason(result)}); will retry"
+      )
+
+      {:error, :llm_degraded}
+    else
+      scored = result |> content_of() |> parse_score()
+      log_unreadable(job_id, result, scored)
+      scored
+    end
   end
+
+  # The LLM bot answers a canned "providers are temporarily unavailable" with degraded: true
+  # when it cannot run a model. That is an outage, not an unreadable reply.
+  defp degraded?(%{"data" => data}) when is_map(data), do: degraded?(data)
+  defp degraded?(%{"degraded" => true}), do: true
+  defp degraded?(_), do: false
+
+  defp degrade_reason(%{"data" => data}) when is_map(data), do: degrade_reason(data)
+  defp degrade_reason(%{"degrade_reason" => reason}), do: to_string(reason)
+  defp degrade_reason(_), do: "unknown"
 
   # A reply that yields no score is logged raw, so the next change is made from what the
   # model actually said and not from a guess. Bounded: a reply is cut to 300 characters.

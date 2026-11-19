@@ -35,4 +35,32 @@ defmodule BotArmyRssPolling.PollerTest do
       wait_for_completed_poll(n - 1)
     end
   end
+
+  describe "mark_scored_seen/1" do
+    alias BotArmyRssPolling.DedupFilter
+
+    test "only an item that scored is marked seen; a failed one is retried next poll" do
+      start_supervised!(DedupFilter)
+      ok = %{"guid" => "scored-1"}
+      failed = %{"guid" => "failed-1"}
+      degraded = %{"guid" => "degraded-1"}
+
+      assert :ok =
+               Poller.mark_scored_seen([
+                 {ok, {:ok, 7}},
+                 {failed, {:error, :parse_error}},
+                 {degraded, {:error, :llm_degraded}}
+               ])
+
+      assert DedupFilter.seen?("scored-1")
+      refute DedupFilter.seen?("failed-1")
+      refute DedupFilter.seen?("degraded-1")
+    end
+
+    test "a low score still counts as seen: it was judged noise, not lost" do
+      start_supervised!(DedupFilter)
+      Poller.mark_scored_seen([{%{"guid" => "noise-1"}, {:ok, 1}}])
+      assert DedupFilter.seen?("noise-1")
+    end
+  end
 end

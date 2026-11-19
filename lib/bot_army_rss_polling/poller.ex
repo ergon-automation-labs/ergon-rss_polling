@@ -115,15 +115,15 @@ defmodule BotArmyRssPolling.Poller do
 
         new_items = Enum.reject(items, fn item -> DedupFilter.seen?(item["guid"]) end)
         Logger.info("#{length(new_items)} new items after dedup filter")
-        Enum.each(new_items, fn item -> DedupFilter.mark_seen(item["guid"]) end)
 
         if is_job_listing?(tags) do
+          Enum.each(new_items, fn item -> DedupFilter.mark_seen(item["guid"]) end)
           Enum.each(new_items, fn item -> Publisher.publish_listing(item, company_name, tags) end)
         else
           # One batch per feed: every item is submitted, then the batch is polled together.
-          new_items
-          |> Sieve.triage_many()
-          |> Enum.each(fn {item, result} -> handle_score(item, result, tags) end)
+          results = Sieve.triage_many(new_items)
+          mark_scored_seen(results)
+          Enum.each(results, fn {item, result} -> handle_score(item, result, tags) end)
         end
 
       {:error, reason} ->
@@ -133,6 +133,15 @@ defmodule BotArmyRssPolling.Poller do
 
   defp poll_feed(feed) do
     Logger.warning("Invalid feed configuration: #{inspect(feed)}")
+  end
+
+  # An item is "seen" once it has been scored, not once it has been fetched. A sieve that
+  # failed (the model was unavailable, the reply was unreadable) leaves the item unseen, so
+  # the next poll tries it again instead of dropping it until the bot restarts.
+  @doc false
+  def mark_scored_seen(results) do
+    for {item, {:ok, _score}} <- results, do: DedupFilter.mark_seen(item["guid"])
+    :ok
   end
 
   defp handle_score(item, {:ok, score}, tags) when score >= 5 do

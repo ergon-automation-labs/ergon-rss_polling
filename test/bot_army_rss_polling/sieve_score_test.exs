@@ -106,4 +106,33 @@ defmodule BotArmyRssPolling.SieveScoreTest do
       assert byte_size(log) < 1_200
     end
   end
+
+  describe "a degraded reply (the bot could not run a model)" do
+    import ExUnit.CaptureLog
+
+    @degraded %{
+      "content" => "LLM providers are temporarily unavailable.",
+      "degraded" => true,
+      "degrade_reason" => ":no_providers_available",
+      "model_used" => "deterministic_fallback"
+    }
+
+    test "is a retryable outage, not an unreadable reply" do
+      log =
+        capture_log(fn -> assert {:error, :llm_degraded} = Sieve.read_result("j", @degraded) end)
+
+      assert log =~ "no_providers_available"
+      refute log =~ "unreadable"
+    end
+
+    test "is recognised inside a data envelope too" do
+      capture_log(fn ->
+        assert {:error, :llm_degraded} = Sieve.read_result("j", %{"data" => @degraded})
+      end)
+    end
+
+    test "a real reply that merely mentions degraded text is still scored" do
+      assert {:ok, 7} = Sieve.read_result("j", %{"content" => "7", "degraded" => false})
+    end
+  end
 end
