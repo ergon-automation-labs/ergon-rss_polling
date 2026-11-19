@@ -13,7 +13,7 @@ defmodule BotArmyRssPolling.Poller do
   use GenServer
   require Logger
 
-  alias BotArmyRssPolling.{FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher, Sieve}
+  alias BotArmyRssPolling.{DateIdeas, FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher, Sieve}
 
   # 15 minutes
   # The sieve scores one item at a time on a shared local model, about five seconds each.
@@ -144,6 +144,7 @@ defmodule BotArmyRssPolling.Poller do
           results = Sieve.triage_many(batch)
           mark_scored_seen(results)
           Enum.each(results, fn {item, result} -> handle_score(item, result, tags) end)
+          date_ideas(results, tags)
           length(batch)
         end
 
@@ -172,6 +173,26 @@ defmodule BotArmyRssPolling.Poller do
   def mark_scored_seen(results) do
     for {item, {:ok, _score}} <- results, do: DedupFilter.mark_seen(item["guid"])
     :ok
+  end
+
+  # Items from date_night-tagged feeds are also judged as outings, whatever the sieve scored:
+  # only the ones the sieve did score (they are now seen and will not come back).
+  # Grep: DATE_IDEAS
+  defp date_ideas(results, tags) do
+    scored = for {item, {:ok, _}} <- results, do: item
+
+    if scored != [] and DateIdeas.eligible?(tags) do
+      scored |> DateIdeas.classify() |> publish_date_ideas(length(scored), tags)
+    end
+  end
+
+  defp publish_date_ideas({:ok, ideas}, judged, tags) do
+    Enum.each(ideas, fn {item, decision} -> Publisher.publish_date_idea(item, decision, tags) end)
+    Logger.info("DATE_IDEAS judged=#{judged} ideas=#{length(ideas)}")
+  end
+
+  defp publish_date_ideas({:error, reason}, judged, _tags) do
+    Logger.warning("DATE_IDEAS judged=0 of #{judged}: #{inspect(reason)}")
   end
 
   defp handle_score(item, {:ok, score}, tags) when score >= 5 do

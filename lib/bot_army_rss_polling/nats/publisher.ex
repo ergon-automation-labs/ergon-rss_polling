@@ -79,6 +79,41 @@ defmodule BotArmyRssPolling.NATS.Publisher do
     end
   end
 
+  @doc """
+  Post an item Clef judged to be an outing to `rss_date_night_stream`, with what it decided
+  (`outing` probability, `energy`, `when`). This is separate from `publish_finding/3`, which
+  files by the feed's first tag and so never reached the date-night stream.
+  """
+  def publish_date_idea(item, %{"outing" => outing} = decision, tags \\ [])
+      when is_map(item) and is_number(outing) do
+    theory_id = "rss_date_night_stream"
+
+    payload = %{
+      "theory_id" => theory_id,
+      "summary" => "Date idea: #{item["title"] || "Untitled"}",
+      "stance" => "support",
+      "source" => "bot_army_rss_polling",
+      "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "metadata" => %{
+        "url" => item["url"] || "",
+        "title" => item["title"] || "",
+        "tags" => tags,
+        "outing" => outing,
+        "energy" => decision["energy"],
+        "when" => decision["when"]
+      }
+    }
+
+    with :ok <- ensure_theory(theory_id, "date_night"),
+         {:ok, _} <- request("bridge.nexus.intelligence.blackboard.evidence.post", payload) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Failed to post date idea: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
   @finding_categories ~w(culinary growth gaming local vitality gifts date_night macro ai uncategorized)
 
   defp finding_category([primary | _]) when primary in @finding_categories, do: primary
