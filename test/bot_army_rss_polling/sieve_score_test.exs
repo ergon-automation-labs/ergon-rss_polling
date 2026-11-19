@@ -53,4 +53,46 @@ defmodule BotArmyRssPolling.SieveScoreTest do
       assert p["query"] =~ "Output ONLY the integer"
     end
   end
+
+  describe "read_result/2" do
+    import ExUnit.CaptureLog
+
+    test "a readable reply is scored and logs nothing" do
+      log = capture_log(fn -> assert {:ok, 7} = Sieve.read_result("j1", %{"data" => %{"content" => "7"}}) end)
+      refute log =~ "unreadable"
+    end
+
+    test "an empty reply is logged raw with its shape and job id" do
+      log =
+        capture_log(fn ->
+          assert {:error, :parse_error} = Sieve.read_result("job-abc", %{"data" => %{"content" => ""}})
+        end)
+
+      assert log =~ "Sieve reply unreadable (parse_error)"
+      assert log =~ "job=job-abc"
+      assert log =~ "shape=map"
+      assert log =~ ~s("content" => "")
+    end
+
+    test "a reply in an unknown shape is logged with its keys, not dropped" do
+      log =
+        capture_log(fn ->
+          assert {:error, :empty_response} = Sieve.read_result("j2", %{"completion" => "9"})
+        end)
+
+      assert log =~ "unreadable (empty_response)"
+      assert log =~ "completion"
+    end
+
+    test "a long reply is cut, not dumped whole" do
+      long = String.duplicate("word ", 400)
+
+      log =
+        capture_log(fn ->
+          Sieve.read_result("j3", %{"data" => %{"content" => long}})
+        end)
+
+      assert byte_size(log) < 1_200
+    end
+  end
 end

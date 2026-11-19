@@ -135,7 +135,7 @@ defmodule BotArmyRssPolling.Sieve do
   defp job_status(job_id) do
     case BotArmyLibraryRuntime.NATS.Publisher.request("llm.job.status", %{"job_id" => job_id}) do
       {:ok, %{"status" => "completed", "result" => result}} ->
-        {:done, result |> content_of() |> parse_score()}
+        {:done, read_result(job_id, result)}
 
       {:ok, %{"status" => "failed"} = job} ->
         Logger.error("Sieve job #{job_id} failed: #{inspect(job["error"])}")
@@ -154,6 +154,28 @@ defmodule BotArmyRssPolling.Sieve do
         :pending
     end
   end
+
+  @doc false
+  def read_result(job_id, result) do
+    scored = result |> content_of() |> parse_score()
+    log_unreadable(job_id, result, scored)
+    scored
+  end
+
+  # A reply that yields no score is logged raw, so the next change is made from what the
+  # model actually said and not from a guess. Bounded: a reply is cut to 300 characters.
+  defp log_unreadable(job_id, result, {:error, reason}) do
+    Logger.warning(
+      "Sieve reply unreadable (#{reason}) job=#{job_id} " <>
+        "shape=#{result_shape(result)} reply=#{inspect(result, limit: 20, printable_limit: 300)}"
+    )
+  end
+
+  defp log_unreadable(_job_id, _result, _scored), do: :ok
+
+  defp result_shape(%{} = map), do: "map keys=#{inspect(Map.keys(map))}"
+  defp result_shape(text) when is_binary(text), do: "binary bytes=#{byte_size(text)}"
+  defp result_shape(other), do: inspect(other, limit: 5)
 
   # The stored result is the chat reply: either {ok, data: {...}} or the fields directly.
   defp content_of(%{"data" => data}) when is_map(data), do: content_of(data)
