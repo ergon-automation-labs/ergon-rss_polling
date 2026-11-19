@@ -31,4 +31,26 @@ defmodule BotArmyRssPolling.SieveScoreTest do
   test "a version-like or decimal number is not read as a score" do
     assert {:error, :parse_error} = Sieve.score_reply("2026")
   end
+
+  describe "request_payload/1" do
+    setup do
+      %{payload: Sieve.request_payload(%{"title" => "Fed cuts rates", "description" => "FOMC"})}
+    end
+
+    test "asks for the local uncensored type, so a cloud model never scores it", %{payload: p} do
+      assert p["model_type"] == "uncensored"
+      assert p["model"] == "baytout3/qwen3.5-uncensored:4b"
+    end
+
+    test "turns thinking off, or the reply is an empty string", %{payload: p} do
+      assert p["think"] == false
+    end
+
+    test "is an async, deterministic request carrying the item text", %{payload: p} do
+      assert p["async"] == true
+      assert p["temperature"] == 0
+      assert p["query"] =~ "Title: Fed cuts rates"
+      assert p["query"] =~ "Output ONLY the integer"
+    end
+  end
 end

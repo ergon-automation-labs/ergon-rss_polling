@@ -10,6 +10,7 @@ defmodule BotArmyRssPolling.Sieve do
 
   require Logger
 
+  @sieve_model "baytout3/qwen3.5-uncensored:4b"
   @job_budget_ms 180_000
   @poll_ms 2_000
 
@@ -38,6 +39,28 @@ defmodule BotArmyRssPolling.Sieve do
 
   # Submit one item as an async job. Returns {:ok, job_id} or {:error, reason}.
   defp submit(item) do
+    payload = request_payload(item)
+
+    case BotArmyLibraryRuntime.NATS.Publisher.request("llm.request.chat", payload) do
+      {:ok, %{"job_id" => job_id}} when is_binary(job_id) ->
+        {:ok, job_id}
+
+      {:ok, %{"ok" => false, "error" => error}} ->
+        Logger.error("LLM Service refused the sieve request: #{inspect(error)}")
+        {:error, :api_error}
+
+      {:error, reason} ->
+        Logger.error("NATS request to llm.request.chat failed: #{inspect(reason)}")
+        {:error, :connection_error}
+
+      other ->
+        Logger.error("Unexpected response from LLM service: #{inspect(other)}")
+        {:error, :malformed_response}
+    end
+  end
+
+  @doc false
+  def request_payload(item) do
     text = "Title: #{item["title"] || ""}\nDescription: #{item["description"] || ""}"
 
     prompt = """
@@ -65,31 +88,18 @@ defmodule BotArmyRssPolling.Sieve do
     #{text}
     """
 
-    payload = %{
+    %{
       "query" => prompt,
-      "model" => "sieve",
+      "model" => @sieve_model,
+      "model_type" => "uncensored",
+      # A reasoning model on its default settings spends the answer on hidden thinking and
+      # replies with an empty string, which is not a score.
+      "think" => false,
       "temperature" => 0,
       # Async: the LLM bot answers with a job id at once; the score is read by polling
       # llm.job.status. A queued (triaged) request cannot be mistaken for an empty answer.
       "async" => true
     }
-
-    case BotArmyLibraryRuntime.NATS.Publisher.request("llm.request.chat", payload) do
-      {:ok, %{"job_id" => job_id}} when is_binary(job_id) ->
-        {:ok, job_id}
-
-      {:ok, %{"ok" => false, "error" => error}} ->
-        Logger.error("LLM Service refused the sieve request: #{inspect(error)}")
-        {:error, :api_error}
-
-      {:error, reason} ->
-        Logger.error("NATS request to llm.request.chat failed: #{inspect(reason)}")
-        {:error, :connection_error}
-
-      other ->
-        Logger.error("Unexpected response from LLM service: #{inspect(other)}")
-        {:error, :malformed_response}
-    end
   end
 
   # One round over the still-pending jobs, then a short sleep, until none are pending or the
