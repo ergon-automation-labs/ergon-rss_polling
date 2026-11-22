@@ -17,6 +17,7 @@ defmodule BotArmyRssPolling.Application do
     children = []
     |> maybe_add_dedup_filter()
     |> maybe_add_poller()
+    |> maybe_add_date_night_writer()
 
     opts = [strategy: :one_for_one, name: BotArmyRssPolling.Supervisor]
     Supervisor.start_link(children, opts)
@@ -24,6 +25,12 @@ defmodule BotArmyRssPolling.Application do
 
   defp maybe_add_dedup_filter(children) do
     if @env == :test, do: children, else: [{BotArmyRssPolling.DedupFilter, []} | children]
+  end
+
+  defp maybe_add_date_night_writer(children) do
+    if @env == :test,
+      do: children,
+      else: [{BotArmyRssPolling.Triggers.DateNight.Writer, []} | children]
   end
 
   defp maybe_add_poller(children) do

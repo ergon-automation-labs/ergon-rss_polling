@@ -13,7 +13,15 @@ defmodule BotArmyRssPolling.Poller do
   use GenServer
   require Logger
 
-  alias BotArmyRssPolling.{DateIdeas, FeedConfig, FeedFetcher, DedupFilter, NATS.Publisher, Sieve}
+  alias BotArmyRssPolling.{
+    DateIdeas,
+    FeedConfig,
+    FeedFetcher,
+    DedupFilter,
+    NATS.Publisher,
+    Sieve,
+    Triggers
+  }
 
   # 15 minutes
   # The sieve scores one item at a time on a shared local model, about five seconds each.
@@ -188,6 +196,7 @@ defmodule BotArmyRssPolling.Poller do
 
   defp publish_date_ideas({:ok, ideas}, judged, tags) do
     Enum.each(ideas, fn {item, decision} -> Publisher.publish_date_idea(item, decision, tags) end)
+    Triggers.DateNight.Writer.submit(ideas)
     Logger.info("DATE_IDEAS judged=#{judged} ideas=#{length(ideas)}")
   end
 
