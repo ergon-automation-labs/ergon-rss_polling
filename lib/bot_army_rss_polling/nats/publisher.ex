@@ -88,6 +88,20 @@ defmodule BotArmyRssPolling.NATS.Publisher do
     end
   end
 
+  # The article a finding is about, so the blackboard can point back at it. Anything that is not
+  # an http(s) URL is sent as nil (absent) rather than refused: a bad feed item must not drop the finding.
+  @doc false
+  def source_url(%{"url" => url}) when is_binary(url) do
+    url = String.trim(url)
+
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) and host != "" -> url
+      _ -> nil
+    end
+  end
+
+  def source_url(_item), do: nil
+
   @doc false
   def finding_payload(item, score, tags, theory_id) do
     %{
@@ -95,6 +109,7 @@ defmodule BotArmyRssPolling.NATS.Publisher do
       "summary" => "High-signal RSS item: #{item["title"] || "Untitled"}",
       "stance" => "support",
       "source" => "bot_army_rss_polling",
+      "source_url" => source_url(item),
       "observed_by" => "bot_army_rss_polling",
       "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "metadata" => %{
@@ -113,6 +128,7 @@ defmodule BotArmyRssPolling.NATS.Publisher do
       "summary" => "Date idea: #{item["title"] || "Untitled"}",
       "stance" => "support",
       "source" => "bot_army_rss_polling",
+      "source_url" => source_url(item),
       "observed_by" => "bot_army_rss_polling",
       "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "metadata" => %{
