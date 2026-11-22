@@ -86,6 +86,28 @@ defmodule BotArmyRssPolling.FeedFetcher do
         items
       end
 
+    case items do
+      [] -> reject_error_feed(doc)
+      _ -> {:ok, normalize(items)}
+    end
+  end
+
+  # A server that is refusing us can still answer 200 with a well-formed feed that has a title and
+  # no items (reddit.com did, 2026-11-22: title "Not Found"). That must not read as "nothing new".
+  @error_title ~r/^\s*(not found|404|403|429|error|forbidden|access denied|too many requests|rate limit|blocked|unauthorized|service unavailable)\b/i
+
+  defp reject_error_feed(doc) do
+    title =
+      doc
+      |> SweetXml.xpath(~x"/*/title/text() | /*/channel/title/text()"s)
+      |> to_string()
+
+    if Regex.match?(@error_title, title),
+      do: {:error, {:error_feed, String.trim(title)}},
+      else: {:ok, []}
+  end
+
+  defp normalize(items) do
     # Normalize to map format with string keys
     normalized =
       Enum.map(items, fn item ->
@@ -99,7 +121,7 @@ defmodule BotArmyRssPolling.FeedFetcher do
       end)
       |> Enum.filter(&(String.length(Map.get(&1, "guid", "")) > 0))
 
-    {:ok, normalized}
+    normalized
   end
 
   # Some feeds (Hacker News) carry no <guid>; the item's link is the stable key then.

@@ -88,4 +88,65 @@ defmodule BotArmyRssPolling.FeedFetcherTest do
     assert {:ok, [item]} = FeedFetcher.fetch("http://127.0.0.1:#{port}/rss")
     assert item["guid"] == "https://example.com/x"
   end
+
+  # Captured from reddit.com on 2026-11-22: HTTP 200, a valid Atom document, zero entries.
+  @reddit_not_found """
+  <?xml version="1.0" encoding="UTF-8"?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+  <updated>2026-11-22T13:56:14Z</updated>
+  <id>https://rss.reddit.com/</id>
+  <link rel="self" href="https://rss.reddit.com/" type="application/atom+xml" />
+  <title>Not Found</title>
+  </feed>
+  """
+
+  test "a 200 feed titled Not Found with no items is an error, not a quiet empty feed" do
+    :persistent_term.put({__MODULE__, :owner}, self())
+    {port, _pid} = serve(@reddit_not_found)
+
+    assert {:error, {:error_feed, "Not Found"}} =
+             FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
+  end
+
+  test "other error titles are caught too, in RSS as well as Atom" do
+    for title <- ["Too Many Requests", "403 Forbidden", "Error", "Access Denied"] do
+      :persistent_term.put({__MODULE__, :owner}, self())
+
+      rss =
+        "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>#{title}</title></channel></rss>"
+
+      {port, _pid} = serve(rss)
+      assert {:error, {:error_feed, ^title}} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
+    end
+  end
+
+  test "a real feed with no new items yet, or one that merely mentions an error, is still fine" do
+    :persistent_term.put({__MODULE__, :owner}, self())
+
+    {port, _pid} =
+      serve(
+        "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Denver Notes</title></channel></rss>"
+      )
+
+    assert {:ok, []} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
+
+    :persistent_term.put({__MODULE__, :owner}, self())
+
+    {port, _pid} =
+      serve(
+        "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Lost &amp; Not Found Antiques</title></channel></rss>"
+      )
+
+    assert {:ok, []} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
+
+    :persistent_term.put({__MODULE__, :owner}, self())
+
+    {port, _pid} =
+      serve(
+        "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Not Found</title>" <>
+          "<item><guid>g</guid><title>Real post</title><link>https://example.com/p</link></item></channel></rss>"
+      )
+
+    assert {:ok, [_]} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
+  end
 end
