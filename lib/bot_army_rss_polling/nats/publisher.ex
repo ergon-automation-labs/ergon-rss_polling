@@ -49,19 +49,7 @@ defmodule BotArmyRssPolling.NATS.Publisher do
       end
 
     # We post this as evidence for the specific topic's theory.
-    payload = %{
-      "theory_id" => theory_id,
-      "summary" => "High-signal RSS item: #{item["title"] || "Untitled"}",
-      "stance" => "support",
-      "source" => "bot_army_rss_polling",
-      "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "metadata" => %{
-        "score" => score,
-        "url" => item["url"] || "",
-        "title" => item["title"] || "",
-        "tags" => tags
-      }
-    }
+    payload = finding_payload(item, score, tags, theory_id)
 
     category = finding_category(tags)
 
@@ -88,11 +76,44 @@ defmodule BotArmyRssPolling.NATS.Publisher do
       when is_map(item) and is_number(outing) do
     theory_id = "rss_date_night_stream"
 
-    payload = %{
+    payload = date_idea_payload(item, decision, tags, theory_id)
+
+    with :ok <- ensure_theory(theory_id, "date_night"),
+         {:ok, _} <- request("bridge.nexus.intelligence.blackboard.evidence.post", payload) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Failed to post date idea: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc false
+  def finding_payload(item, score, tags, theory_id) do
+    %{
+      "theory_id" => theory_id,
+      "summary" => "High-signal RSS item: #{item["title"] || "Untitled"}",
+      "stance" => "support",
+      "source" => "bot_army_rss_polling",
+      "observed_by" => "bot_army_rss_polling",
+      "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "metadata" => %{
+        "score" => score,
+        "url" => item["url"] || "",
+        "title" => item["title"] || "",
+        "tags" => tags
+      }
+    }
+  end
+
+  @doc false
+  def date_idea_payload(item, %{"outing" => outing} = decision, tags, theory_id) do
+    %{
       "theory_id" => theory_id,
       "summary" => "Date idea: #{item["title"] || "Untitled"}",
       "stance" => "support",
       "source" => "bot_army_rss_polling",
+      "observed_by" => "bot_army_rss_polling",
       "observed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "metadata" => %{
         "url" => item["url"] || "",
@@ -103,15 +124,6 @@ defmodule BotArmyRssPolling.NATS.Publisher do
         "when" => decision["when"]
       }
     }
-
-    with :ok <- ensure_theory(theory_id, "date_night"),
-         {:ok, _} <- request("bridge.nexus.intelligence.blackboard.evidence.post", payload) do
-      :ok
-    else
-      {:error, reason} ->
-        Logger.error("Failed to post date idea: #{inspect(reason)}")
-        {:error, reason}
-    end
   end
 
   @finding_categories ~w(culinary growth gaming local vitality gifts date_night macro ai uncategorized)
