@@ -171,4 +171,52 @@ defmodule BotArmyRssPolling.DateIdeasTest do
       assert {:ok, []} = DateIdeas.classify([], fn _ -> flunk("should not ask") end)
     end
   end
+
+  describe "report?/1: a title that reports something already over is not an outing" do
+    test "past-event wording is caught, from the real titles that got through" do
+      for t <- [
+            "Denver just hosted its first Hyrox, the world’s fastest-growing fitness race",
+            "Recap: the Turkey Trot drew 10,000 runners",
+            "What happened at the Boulder Film Festival last weekend",
+            "Thousands showed up last night for the tree lighting",
+            "The marathon wrapped up Sunday with record times",
+            "The Great Colorado Beer Fest took place at Mile High"
+          ] do
+        assert DateIdeas.report?(item(1, t)), t
+      end
+    end
+
+    test "real outings, including ones that merely sound recent, are not caught" do
+      for t <- [
+            "Free things to do in Denver this weekend, Nov. 20-22",
+            "A new Thai restaurant just opened in RiNo",
+            "Thursday-night jams are coming back to River North",
+            "Hot springs near Denver for a winter soak",
+            "The Nutcracker returns to the Buell this December"
+          ] do
+        refute DateIdeas.report?(item(1, t)), t
+      end
+    end
+
+    test "classify never asks Clef about a report, and asks nothing when only reports remain" do
+      assert {:ok, []} =
+               DateIdeas.classify(
+                 [item(1, "Denver just hosted its first Hyrox")],
+                 fn _ -> flunk("a report must not be sent to Clef") end
+               )
+    end
+
+    test "classify still judges the real outings beside a report" do
+      items = [item(1, "Denver just hosted its first Hyrox"), item(2, "Holiday market")]
+      assert {:ok, [{%{"guid" => "g2"}, _}]} = DateIdeas.classify(items, clef(@table))
+    end
+
+    test "the outing question tells the model what is not an outing" do
+      %{"questions" => %{"i1_outing" => %{"instructions" => text}}} =
+        DateIdeas.outing_request([item(1, "x")])
+
+      assert text =~ "already happened"
+      assert text =~ "sports"
+    end
+  end
 end

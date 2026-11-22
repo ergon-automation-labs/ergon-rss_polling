@@ -46,6 +46,22 @@ defmodule BotArmyRssPolling.DateIdeas do
   def classify([], _decide), do: {:ok, []}
 
   def classify(items, decide) do
+    case Enum.reject(items, &report?/1) do
+      [] -> {:ok, []}
+      outings -> judge(outings, decide)
+    end
+  end
+
+  # Titles that report something already over: no question to Clef, which let "Denver just
+  # hosted its first Hyrox" through as an outing (2026-11-22). Deliberately narrow, and about
+  # tense, not topic: "a new restaurant just opened" is still somewhere to go.
+  @report_re ~r/\b(just hosted|just wrapped|wrapped up|took place|was held|were held|last weekend|last night|recap|what happened (at|to))\b/i
+
+  @doc "Whether an item's title reports an event that is already over."
+  @spec report?(map()) :: boolean()
+  def report?(item), do: Regex.match?(@report_re, item["title"] || "")
+
+  defp judge(items, decide) do
     with {:ok, outings} <-
            in_chunks(items, @outing_per_decision, &outing_request/1, decide, &read_outings/2),
          {:ok, details} <-
@@ -116,7 +132,9 @@ defmodule BotArmyRssPolling.DateIdeas do
               "type" => "noul",
               "instructions" =>
                 "Is item #{n} something two people could go and do together in or near Denver/Boulder — " <>
-                  "an event, show, market, exhibit, restaurant, class, trail or trip? News about it is not."
+                  "an event, show, market, exhibit, restaurant, class, trail or trip that they could still go to? " <>
+                  "No, if it is news or a report: something that already happened, sports or team business, " <>
+                  "crime, politics, prices, a lawsuit, a closure, or an opinion piece."
             }
           }
         end)
