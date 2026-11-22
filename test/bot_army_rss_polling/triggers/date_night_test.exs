@@ -152,6 +152,86 @@ defmodule BotArmyRssPolling.Triggers.DateNightTest do
     end
   end
 
+  describe "ends_on/2: the end date the title itself states" do
+    test "a day range in one month" do
+      assert DateNight.ends_on("Free things to do this weekend, Nov. 20-22", @today) ==
+               ~D[2026-11-22]
+    end
+
+    test "a range across months, and with the word to" do
+      assert DateNight.ends_on("Events Nov 28 to Dec 3", @today) == ~D[2026-12-03]
+      assert DateNight.ends_on("Lights through Dec. 31", @today) == ~D[2026-12-31]
+    end
+
+    test "a single date, long month names, and the latest date wins" do
+      assert DateNight.ends_on("Opening night November 27", @today) == ~D[2026-11-27]
+      assert DateNight.ends_on("Fri Nov 20 and Sat Nov 21 shows", @today) == ~D[2026-11-21]
+    end
+
+    test "a January date seen in December is next year; a December date seen in January is last year" do
+      assert DateNight.ends_on("Parade Jan 3", ~D[2026-12-28]) == ~D[2027-01-03]
+      assert DateNight.ends_on("Holiday market Dec 20", ~D[2027-01-05]) == ~D[2026-12-20]
+    end
+
+    test "no date, an impossible date, or words that only look like one give nil" do
+      assert DateNight.ends_on("Best hot springs near Denver", @today) == nil
+      assert DateNight.ends_on("Feb 31 special", @today) == nil
+      assert DateNight.ends_on("The Mayor's march of progress", @today) == nil
+      assert DateNight.ends_on(nil, @today) == nil
+    end
+  end
+
+  describe "an idea whose title says when it ends" do
+    test "is gone the day after it ends, even though it was seen only yesterday" do
+      over =
+        idea("Free things this weekend, Nov. 14-15", %{
+          "when" => "dated_event",
+          "seen" => "2026-11-21"
+        })
+
+      state = DateNight.merge(%{"ideas" => [over], "pick" => nil}, [], @today)
+      assert state["ideas"] == []
+    end
+
+    test "is kept through its last day, however long ago it was first seen" do
+      on =
+        idea("Free things this weekend, Nov. 20-22", %{
+          "when" => "dated_event",
+          "seen" => "2026-11-16"
+        })
+
+      state = DateNight.merge(%{"ideas" => [on], "pick" => nil}, [], @today)
+      assert [_] = state["ideas"]
+
+      assert %{pick: %{"title" => "Free things this weekend, Nov. 20-22"}} =
+               DateNight.choose(state, @today)
+    end
+
+    test "an expired pick is replaced by the next idea, and the note stops showing it" do
+      over =
+        idea("Free things this weekend, Nov. 14-15", %{
+          "when" => "dated_event",
+          "seen" => "2026-11-21"
+        })
+
+      fresh = idea("Hot springs")
+      state = %{"ideas" => [over, fresh], "pick" => over["url"]}
+      assert %{pick: %{"title" => "Hot springs"}} = DateNight.choose(state, @today)
+      refute DateNight.render(state, @today) =~ "Nov. 14-15"
+    end
+
+    test "an evergreen idea ignores a date in its title" do
+      any =
+        idea("Why I loved the Nov 3 hot springs trip", %{
+          "when" => "anytime",
+          "seen" => "2026-11-20"
+        })
+
+      state = DateNight.merge(%{"ideas" => [any], "pick" => nil}, [], @today)
+      assert [_] = state["ideas"]
+    end
+  end
+
   describe "round trip through the file" do
     test "the state survives being written into the note and read back" do
       state = %{

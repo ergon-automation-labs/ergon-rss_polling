@@ -162,9 +162,58 @@ defmodule BotArmyRssPolling.Triggers.DateNight do
   defp pick_url(:none), do: nil
   defp pick_url(%{pick: pick}), do: pick["url"]
 
+  # A dated event or seasonal idea whose title states when it ends is over the day after that,
+  # whatever the age rule says. Anything else (and anything evergreen) falls back to age.
   defp fresh?(idea, today) do
+    ends = if idea["when"] in ["dated_event", "this_season"], do: ends_on(idea["title"], today)
+
+    case ends do
+      nil -> fresh_by_age?(idea, today)
+      date -> Date.compare(date, today) != :lt
+    end
+  end
+
+  defp fresh_by_age?(idea, today) do
     age = Date.diff(today, seen(idea, today))
     age <= if(idea["when"] == "dated_event", do: @dated_days, else: @other_days)
+  end
+
+  @months ~w(jan feb mar apr may jun jul aug sep oct nov dec)
+  @date_re ~r/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b(?:\s*(?:-|–|—|to|through|thru)\s*(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+)?(\d{1,2})\b)?/i
+
+  @doc "The latest date a title states (`Nov. 20-22`, `through Dec. 31`), or nil. Year is inferred from `today`."
+  def ends_on(title, today) when is_binary(title) do
+    @date_re
+    |> Regex.scan(title)
+    |> Enum.flat_map(&match_end(&1, today))
+    |> Enum.max(Date, fn -> nil end)
+  end
+
+  def ends_on(_title, _today), do: nil
+
+  defp match_end([_, m1, d1], today), do: to_date(m1, d1, today)
+  defp match_end([_, m1, d1, ""], today), do: to_date(m1, d1, today)
+  defp match_end([_, m1, _d1, "", d2], today), do: to_date(m1, d2, today)
+  defp match_end([_, _m1, _d1, m2, d2], today), do: to_date(m2, d2, today)
+
+  defp to_date(month, day, today) do
+    with n when n != nil <- Enum.find_index(@months, &(&1 == String.downcase(month))),
+         {d, ""} <- Integer.parse(day),
+         {:ok, date} <- Date.new(today.year, n + 1, d) do
+      [shift_year(date, today)]
+    else
+      _ -> []
+    end
+  end
+
+  # No year in a title: a date more than ~half a year past is next year's, more than ~half a year
+  # ahead is last year's.
+  defp shift_year(date, today) do
+    cond do
+      Date.diff(today, date) > 180 -> %{date | year: date.year + 1}
+      Date.diff(date, today) > 180 -> %{date | year: date.year - 1}
+      true -> date
+    end
   end
 
   defp seen(idea, today) do
