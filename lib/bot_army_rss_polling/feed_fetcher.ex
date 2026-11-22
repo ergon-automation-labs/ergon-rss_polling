@@ -48,8 +48,15 @@ defmodule BotArmyRssPolling.FeedFetcher do
     end
   end
 
+  # An XML declaration must be the first thing in the document. 5280.com sends "\n<?xml ...?>", and
+  # some servers prepend a BOM; strictly parsed, either is "invalid_target_name" and the feed is lost.
   defp parse_feed(body) when is_binary(body) do
-    doc = SweetXml.parse(body, quiet: true)
+    doc =
+      body
+      |> String.trim_leading("\uFEFF")
+      |> String.trim_leading()
+      |> SweetXml.parse(quiet: true)
+
     parse_items(doc)
   catch
     :exit, reason ->

@@ -133,4 +133,19 @@ defmodule BotArmyRssPolling.FeedFetcherTest do
     {port, _pid} = serve(rss("Not Found", item))
     assert {:ok, [_]} = FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/")
   end
+
+  test "a feed whose body starts with whitespace or a BOM before the XML declaration is parsed" do
+    # 5280.com sends "\n<?xml ...?>" (captured from mini 2026-11-22); a strict parser reads the
+    # declaration as a processing instruction named "xml" and refuses the whole feed.
+    item = "<item><guid>g</guid><title>Real post</title><link>https://example.com/p</link></item>"
+
+    for lead <- ["\n", "  \r\n\t", <<0xEF, 0xBB, 0xBF>>, <<0xEF, 0xBB, 0xBF>> <> "\n"] do
+      :persistent_term.put({__MODULE__, :owner}, self())
+      {port, _pid} = serve(lead <> rss("Denver Notes", item))
+
+      assert {:ok, [%{"title" => "Real post"}]} =
+               FeedFetcher.fetch("http://127.0.0.1:#{port}/feed/"),
+             "leading #{inspect(lead)}"
+    end
+  end
 end
